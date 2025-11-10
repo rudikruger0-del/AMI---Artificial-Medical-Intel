@@ -2,14 +2,28 @@ import streamlit as st
 from tensorflow.keras.models import load_model
 from PIL import Image
 import numpy as np
+import gdown
+import os
 
-# Load your trained model
+# Function to load AI model with caching
+@st.cache_resource
 def load_ai_model():
-    model = load_model("model.h5")  # Ensure model.h5 is in the same folder
+    model_path = "model.h5"
+    file_id = "1jEaQSeUgmelqsI4XRcna3AxR02bXplrb"  # Google Drive file ID
+    url = f"https://drive.google.com/uc?id={file_id}"
+
+    if not os.path.exists(model_path):
+        st.info("Downloading AI model from Google Drive...")
+        gdown.download(url, model_path, quiet=False)
+        st.success("Download complete!")
+
+    model = load_model(model_path)
     return model
 
-model = None
+# Load model
+model = load_ai_model()
 
+# Streamlit UI
 st.title("Artificial Medical Intel - Breast Cancer Cell Detection")
 st.write("Upload CT/Mammography/Sonar scan images to detect potential tumors.")
 
@@ -21,9 +35,6 @@ if uploaded_file:
 
     if st.button("Analyze Image"):
         with st.spinner("Analyzing..."):
-            if model is None:
-                model = load_ai_model()
-
             img = image.resize((224, 224))
             img_array = np.array(img) / 255.0
             img_array = np.expand_dims(img_array, axis=0)
