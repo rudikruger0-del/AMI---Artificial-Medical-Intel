@@ -6,7 +6,6 @@ import gdown
 import tensorflow as tf
 from tensorflow.keras.models import load_model, Model
 import cv2
-import matplotlib.pyplot as plt
 
 # ----------------------------
 # Load AI model
@@ -116,4 +115,60 @@ if uploaded_file:
         metrics_text = ""
         draw = ImageDraw.Draw(image)
         for cnt in contours:
-            x, y, w, h = cv2.bou
+            x, y, w, h = cv2.boundingRect(cnt)
+            area = w * h
+            crop = np.array(image.crop((x, y, x + w, y + h)))
+            avg_color = tuple(np.mean(crop.reshape(-1, 3), axis=0).astype(int))
+            draw.rectangle([x, y, x + w, y + h], outline="red", width=2)
+            metrics_text += f"- Tumor region: x={x}, y={y}, width={w}, height={h}, area={area} px, avg_color={avg_color}\n"
+
+        st.image(image, caption="Detected Tumor Regions with Bounding Boxes", use_column_width=True)
+        if metrics_text:
+            st.write("**Tumor Metrics:**")
+            st.text(metrics_text)
+        else:
+            st.write("No distinct tumor regions detected for metric estimation.")
+    except Exception as e:
+        st.warning(f"Tumor metrics could not be calculated: {e}")
+
+    # ----------------------------
+    # Professional medical notes
+    # ----------------------------
+    st.write("**Medical Analysis / Recommendations:**")
+    if prediction > 0.6:
+        st.write("""
+- Immediate consultation with oncologist or radiologist is advised.
+- Consider further imaging (MRI, CT, ultrasound) for confirmation.
+- Biopsy may be recommended based on clinical judgment.
+- Review patient history and other scans.
+- Follow-up schedule should be defined based on tumor severity.
+""")
+    else:
+        st.write("""
+- No evidence of tumor detected in this scan.
+- Routine screening and follow-ups per medical guidelines recommended.
+- Encourage healthy lifestyle and regular check-ups.
+""")
+
+    # ----------------------------
+    # Feedback mechanism
+    # ----------------------------
+    st.write("Was the prediction correct?")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("✅ Yes, correct"):
+            label_val = 1 if prediction > 0.6 else 0
+            filename = f"{FEEDBACK_DIR}/img_{np.random.randint(1_000_000)}_label_{label_val}.png"
+            image.save(filename)
+            st.success("Feedback saved for future learning!")
+
+    with col2:
+        if st.button("❌ No, wrong"):
+            correct_label = st.radio("Select correct label", options=["Healthy", "Tumor"])
+            if st.button("Save correct label"):
+                label_val = 0 if correct_label=="Healthy" else 1
+                filename = f"{FEEDBACK_DIR}/img_{np.random.randint(1_000_000)}_label_{label_val}.png"
+                image.save(filename)
+                st.success("Correct label saved for future retraining!")
+
