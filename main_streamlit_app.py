@@ -130,7 +130,7 @@ if uploaded_file:
         except Exception as e:
             st.warning(f"Heatmap could not be generated: {e}")
 
-        # Tumor metrics
+        # Tumor metrics with circles
         if heatmap is not None:
             try:
                 thresh = cv2.threshold(heatmap, 128, 255, cv2.THRESH_BINARY)[1]
@@ -143,17 +143,25 @@ if uploaded_file:
                     x, y, w, h = cv2.boundingRect(cnt)
                     area = w*h
                     total_area += area
+                    center_x = x + w // 2
+                    center_y = y + h // 2
+                    radius = max(w,h)//2
+
+                    # Draw circle around tumor
+                    draw.ellipse([(center_x - radius, center_y - radius),
+                                  (center_x + radius, center_y + radius)], outline="red", width=3)
+
                     crop = np.array(image.crop((x, y, x+w, y+h)))
                     avg_color = tuple(np.mean(crop.reshape(-1,3), axis=0).astype(int))
-                    draw.rectangle([x, y, x+w, y+h], outline="red", width=2)
-                    metrics_text += f"- Tumor {i+1}: x={x}, y={y}, width={w}, height={h}, area={area}px, avg_color={avg_color}\n"
+                    metrics_text += f"- Tumor {i+1}: center=({center_x},{center_y}), radius={radius}px, area={area}px, avg_color={avg_color}\n"
 
-                coverage_ratio = total_area / (img_np.shape[0]*img_np.shape[1])
+                coverage_ratio = total_area / (img_np.shape[0] * img_np.shape[1])
                 metrics_text += f"\n- Tumor coverage ratio: {coverage_ratio:.4f} of scan area\n"
 
-                st.image(image, caption="Detected Tumor Regions", use_column_width=True)
+                st.image(image, caption="Detected Tumor Regions (circled)", use_column_width=True)
                 st.write("**Tumor Metrics:**")
                 st.text(metrics_text)
+
             except Exception as e:
                 st.warning(f"Tumor metrics could not be calculated: {e}")
 
