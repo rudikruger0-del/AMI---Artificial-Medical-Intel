@@ -1,13 +1,7 @@
-streamlit
-tensorflow
-keras
-opencv-python-headless
-numpy
-matplotlib
-pillow
 tensorflow
 gdown
 streamlit
 numpy
 pillow
 matplotlib
+opencv-python-headless
