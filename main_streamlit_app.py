@@ -1,12 +1,12 @@
 import streamlit as st
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image as keras_image
-from PIL import Image, ImageDraw
 import numpy as np
+from PIL import Image, ImageDraw
 import os
 import gdown
-import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow.keras.models import load_model, Model
 import cv2
+import matplotlib.pyplot as plt
 
 # ----------------------------
 # Load AI model
@@ -34,10 +34,33 @@ FEEDBACK_DIR = "feedback_data"
 os.makedirs(FEEDBACK_DIR, exist_ok=True)
 
 # ----------------------------
+# Grad-CAM function
+# ----------------------------
+def generate_gradcam_heatmap(model, img_array, last_conv_layer_name="conv2d_1"):
+    grad_model = Model(
+        [model.inputs],
+        [model.get_layer(last_conv_layer_name).output, model.output]
+    )
+    with tf.GradientTape() as tape:
+        conv_outputs, predictions = grad_model(img_array)
+        loss = predictions[:, 0]
+
+    grads = tape.gradient(loss, conv_outputs)
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+    conv_outputs = conv_outputs[0]
+    heatmap = tf.reduce_sum(tf.multiply(pooled_grads, conv_outputs), axis=-1)
+    heatmap = np.maximum(heatmap, 0)
+    if np.max(heatmap) != 0:
+        heatmap /= np.max(heatmap)
+    heatmap = cv2.resize(heatmap.numpy(), (img_array.shape[2], img_array.shape[1]))
+    heatmap = np.uint8(255 * heatmap)
+    return heatmap
+
+# ----------------------------
 # Streamlit UI
 # ----------------------------
 st.title("Artificial Medical Intel - Breast Cancer Scan Analysis")
-st.write("Upload CT / Mammography / Sonar scans for tumor detection.")
+st.write("Upload CT / Mammography / Sonar scans to detect potential tumors.")
 
 uploaded_file = st.file_uploader("Upload an image", type=["jpg","jpeg","png"])
 
@@ -45,35 +68,27 @@ if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Scan", use_column_width=True)
 
-    # ----------------------------
     # Preprocess image
-    # ----------------------------
     img_resized = image.resize((224, 224))
     img_array = np.array(img_resized)/255.0
     img_array_exp = np.expand_dims(img_array, axis=0)
 
-    # ----------------------------
-    # Model prediction
-    # ----------------------------
+    # Prediction
     prediction = model.predict(img_array_exp)[0][0]
     confidence = prediction * 100
 
     # ----------------------------
-    # Generate heatmap
+    # Grad-CAM heatmap
     # ----------------------------
     try:
-        from tensorflow.keras.models import Model
-        last_conv_layer = model.layers[0]  # first Conv2D layer
-        heatmap_model = Model(inputs=model.inputs, outputs=last_conv_layer.output)
-        conv_output = heatmap_model.predict(img_array_exp)[0]
-        heatmap = np.mean(conv_output, axis=-1)
-        heatmap = cv2.resize(heatmap, (image.width, image.height))
-        heatmap = np.uint8(255 * heatmap / np.max(heatmap))
-        heatmap_img = Image.fromarray(heatmap).convert("RGB")
-        heatmap_img = Image.blend(image, heatmap_img, alpha=0.5)
-        st.image(heatmap_img, caption="Heatmap Overlay", use_column_width=True)
-    except:
-        st.warning("Heatmap could not be generated.")
+        heatmap = generate_gradcam_heatmap(model, img_array_exp, last_conv_layer_name="conv2d_1")
+        heatmap_color = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        original_img = cv2.cvtColor(np.array(img_resized), cv2.COLOR_RGB2BGR)
+        overlay_img = cv2.addWeighted(original_img, 0.6, heatmap_color, 0.4, 0)
+        overlay_pil = Image.fromarray(cv2.cvtColor(overlay_img, cv2.COLOR_BGR2RGB))
+        st.image(overlay_pil, caption="Heatmap Overlay (model-focused)", use_column_width=True)
+    except Exception as e:
+        st.warning(f"Heatmap could not be generated: {e}")
 
     # ----------------------------
     # Safe thresholds
@@ -93,66 +108,12 @@ if uploaded_file:
     st.write(f"**Severity rating:** {severity}")
 
     # ----------------------------
-    # Tumor metrics estimation (bounding box)
+    # Tumor metrics from heatmap
     # ----------------------------
     try:
-        gray = cv2.cvtColor(np.array(img_resized), cv2.COLOR_RGB2GRAY)
-        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        thresh = cv2.threshold(heatmap, 128, 255, cv2.THRESH_BINARY)[1]
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
         metrics_text = ""
         draw = ImageDraw.Draw(image)
         for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            area = w*h
-            draw.rectangle([x, y, x+w, y+h], outline="red", width=2)
-            metrics_text += f"- Tumor region: x={x}, y={y}, width={w}, height={h}, area={area} pixels\n"
-
-        st.image(image, caption="Detected Tumor Regions", use_column_width=True)
-        if metrics_text:
-            st.write("**Tumor Metrics:**")
-            st.text(metrics_text)
-        else:
-            st.write("No clear tumor regions detected for metric estimation.")
-    except:
-        st.warning("Could not estimate tumor metrics.")
-
-    # ----------------------------
-    # Professional medical-style notes
-    # ----------------------------
-    st.write("**Medical Analysis / Recommendations:**")
-    if prediction > 0.6:
-        st.write("""
-- Immediate consultation with oncologist or radiologist is advised.
-- Consider further imaging (MRI, CT, ultrasound) for confirmation.
-- Biopsy may be recommended based on clinical judgment.
-- Patient history and other scans should be considered.
-""")
-    else:
-        st.write("""
-- No evidence of tumor detected in this scan.
-- Routine screening and follow-ups per guidelines recommended.
-- Encourage healthy lifestyle and regular check-ups.
-""")
-
-    # ----------------------------
-    # Feedback mechanism for self-learning
-    # ----------------------------
-    st.write("Was the prediction correct?")
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("✅ Yes, correct"):
-            label_val = 1 if prediction > 0.6 else 0
-            filename = f"{FEEDBACK_DIR}/img_{np.random.randint(1_000_000)}_label_{label_val}.png"
-            image.save(filename)
-            st.success("Feedback saved for future learning!")
-
-    with col2:
-        if st.button("❌ No, wrong"):
-            correct_label = st.radio("Select correct label", options=["Healthy", "Tumor"])
-            if st.button("Save correct label"):
-                label_val = 0 if correct_label=="Healthy" else 1
-                filename = f"{FEEDBACK_DIR}/img_{np.random.randint(1_000_000)}_label_{label_val}.png"
-                image.save(filename)
-                st.success("Correct label saved for future retraining!")
+            x, y, w, h = cv2.bou
