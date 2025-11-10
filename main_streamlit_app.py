@@ -110,4 +110,4 @@ if uploaded_file:
                 st.image(heatmap_img, caption="Heatmap of tumor areas", use_column_width=True)
             except Exception as e:
                 st.warning(f"Could not generate heatmap: {e}")
-detected in the scanned region.")
+
