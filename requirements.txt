@@ -5,3 +5,12 @@ numpy
 pillow
 matplotlib
 opencv-python-headless
+tensorflow
+keras
+opencv-python-headless
+numpy
+pillow
+streamlit
+reportlab
+gdown
+scikit-learn
